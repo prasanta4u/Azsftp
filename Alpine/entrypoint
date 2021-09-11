@@ -1,0 +1,102 @@
+#!/bin/bash
+set -Eeo pipefail
+function log() {
+        echo "`date` $*" >> /home/config/log
+}
+
+reUser='[A-Za-z0-9._][A-Za-z0-9._-]{3,15}' # POSIX.1-2008
+reUid='[[:digit:]]*'
+reAction='[+-]{1}'
+
+function validateArg() {
+    name="$1"
+    val="$2"
+    re="$3"
+
+    if [[ "$val" =~ ^$re$ ]]; then
+        return 0
+    else
+        log "ERROR: Invalid $name \"$val\", do not match required regex pattern: $re"
+        return 1
+    fi
+}
+
+if  mountpoint -q /home; then
+        if [ ! -d /home/config ]; then
+            mkdir -p /home/config
+            mkdir -p /home/config/usersshkeys
+            mkdir -p /home/config/users
+            log "config directory initialized"
+        fi
+        if [ ! -f /home/config/ssh/ssh_host_ed25519_key ]; then
+            if [ ! -d /home/config/ssh ]; then
+                mkdir -p /home/config/ssh
+            fi
+            ssh-keygen -t ed25519 -f /home/config/ssh/ssh_host_ed25519_key -N ''
+            cp /home/config/ssh/ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key
+            chmod 600 /etc/ssh/ssh_host_ed25519_key || true
+            log "ssh host ed key created in config directory and copied"
+        else 
+            cp /home/config/ssh/ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key
+            chmod 600 /etc/ssh/ssh_host_ed25519_key || true
+            log "ssh ed keys from config directory restored"
+        fi
+
+        if [ ! -f /home/config/ssh/ssh_host_rsa_key ]; then
+            ssh-keygen -t rsa -b 4096 -f /home/config/ssh/ssh_host_rsa_key -N ''
+            cp /home/config/ssh/ssh_host_rsa_key /etc/ssh/ssh_host_rsa_key
+            chmod 600 /etc/ssh/ssh_host_rsa_key || true
+            log "ssh host rsa key created in config directory and copied"
+        else 
+            cp /home/config/ssh/ssh_host_rsa_key /etc/ssh/ssh_host_rsa_key
+            chmod 600 /etc/ssh/ssh_host_rsa_key || true
+            log "ssh rsa keys from config directory restored"
+        fi
+
+        if [ ! -f /home/config/users/userlist ]; then
+            echo -e "# In this file add the username and action in username:uid:action format.\n# UID needs to be 1000 and above and unique. Action filed to be + for active user " >> /home/config/users/userlist
+            log "initial userlist file created"
+        else
+            while read line
+            do
+                [[ "$line" =~ ^#.*$ ]] && continue
+                IFS=":" read -ra args <<< $line
+
+                user="${args[0]}"; validateArg "username" "$user" "$reUser"
+		uid="${args[1]}"; validateArg "UID" "$uid" "$reUid" 
+                action="${args[2]}"; validateArg "action" "$action" "$reAction"
+                log "checking for user $user"
+                if [ "$action" = "+" ]; then
+                    log "action defined to add user $user"
+                    if [ "$uid" -ge "1000" ]; then
+			adduser -DH "$user"
+			usermod -p "*" "$user"
+			userhomedir="/home/$user"
+			usersshauthkeys="/home/$user/.ssh/authorized_keys"
+			if [ ! -d "$userhomedir" ] ; then
+				mkdir -p "$userhomedir"
+				chown root:root "$userhomedir"
+				chmod 755 "$userhomedir"
+				mkdir "$userhomedir/sftp"
+				chown $user:$user "$userhomedir/sftp"
+				log "Home and sftp directory created for $user"
+			fi
+			if [ ! -f "$usersshauthkeys" ]; then
+				ssh-keygen -t rsa -b 4096 -C "$user" -f "/home/config/usersshkeys/$user" -N "" 
+				mkdir "/home/$user/.ssh" 
+				mv "/home/config/usersshkeys/$user.pub" "/home/$user/.ssh/authorized_keys" 
+				chown "$user" "/home/$user/.ssh/authorized_keys" 
+				chmod 600 "/home/$user/.ssh/authorized_keys" 
+				log " SSH keys created for $user and the private key to share with user kept at /home/config/usersshkeys/$user"
+		         fi
+                    else
+                        log "Give UID for user $user is not in correct"
+                    fi
+                fi
+            
+            done <  /home/config/users/userlist
+        fi
+        
+	log "Executing sshd"
+	exec /usr/sbin/sshd -D -e
+fi
