@@ -14,6 +14,6 @@ ChallengeResponseAuthentication no
 # Force sftp and chroot jail
 Subsystem sftp internal-sftp
 ForceCommand internal-sftp
-ChrootDirectory %h
+ChrootDirectory /home/data/home/%u
 # Enable this for more logs
 #LogLevel VERBOSE

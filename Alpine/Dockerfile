@@ -7,7 +7,8 @@ MAINTAINER Prasanta Kumar Panda (prasanta.kumar@outlook.com)
 # - OpenSSH needs /var/run/sshd to run
 # - Remove generic host keys, entrypoint generates unique keys
 RUN apk add --no-cache bash shadow openssh openssh-sftp-server && \
-    mkdir -p /var/run/sshd 
+    mkdir -p /var/run/sshd && \
+    mkdir /home/data
 
 COPY sshd_config /etc/ssh/sshd_config
 COPY entrypoint /

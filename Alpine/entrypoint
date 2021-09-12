@@ -1,7 +1,7 @@
 #!/bin/bash
 set -Eeo pipefail
 function log() {
-        echo "`date` $*" >> /home/config/log
+    echo "`date` $*" >> /home/data/config/log
 }
 
 reUser='[A-Za-z0-9._][A-Za-z0-9._-]{3,15}' # POSIX.1-2008
@@ -21,41 +21,45 @@ function validateArg() {
     fi
 }
 
-if  mountpoint -q /home; then
-        if [ ! -d /home/config ]; then
-            mkdir -p /home/config
-            mkdir -p /home/config/usersshkeys
-            mkdir -p /home/config/users
-            log "config directory initialized"
+if  mountpoint -q /home/data; then
+        if [ ! -d /home/data/config ]; then
+            mkdir -p /home/data/config
+            mkdir -p /home/data/config/usersshkeys
+            mkdir -p /home/data/config/users
+            log "INFO: Config directory initialized"
         fi
-        if [ ! -f /home/config/ssh/ssh_host_ed25519_key ]; then
-            if [ ! -d /home/config/ssh ]; then
-                mkdir -p /home/config/ssh
+        if [ ! -d /home/data/home ]; then
+            mkdir -p /home/data/home
+            log "INFO: Data home directory created"
+        fi
+        if [ ! -f /home/data/config/ssh/ssh_host_ed25519_key ]; then
+            if [ ! -d /home/data/config/ssh ]; then
+                mkdir -p /home/data/config/ssh
             fi
-            ssh-keygen -t ed25519 -f /home/config/ssh/ssh_host_ed25519_key -N ''
-            cp /home/config/ssh/ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key
+            ssh-keygen -t ed25519 -f /home/data/config/ssh/ssh_host_ed25519_key -N ''
+            cp /home/data/config/ssh/ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key
             chmod 600 /etc/ssh/ssh_host_ed25519_key || true
-            log "ssh host ed key created in config directory and copied"
+            log "INFO: Ssh host ed key created in config directory and copied"
         else 
-            cp /home/config/ssh/ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key
+            cp /home/data/config/ssh/ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key
             chmod 600 /etc/ssh/ssh_host_ed25519_key || true
-            log "ssh ed keys from config directory restored"
+            log "INFO: Ssh ed keys from config directory restored"
         fi
 
-        if [ ! -f /home/config/ssh/ssh_host_rsa_key ]; then
-            ssh-keygen -t rsa -b 4096 -f /home/config/ssh/ssh_host_rsa_key -N ''
-            cp /home/config/ssh/ssh_host_rsa_key /etc/ssh/ssh_host_rsa_key
+        if [ ! -f /home/data/config/ssh/ssh_host_rsa_key ]; then
+            ssh-keygen -t rsa -b 4096 -f /home/data/config/ssh/ssh_host_rsa_key -N ''
+            cp /home/data/config/ssh/ssh_host_rsa_key /etc/ssh/ssh_host_rsa_key
             chmod 600 /etc/ssh/ssh_host_rsa_key || true
-            log "ssh host rsa key created in config directory and copied"
+            log "INFO: Ssh host rsa key created in config directory and copied"
         else 
-            cp /home/config/ssh/ssh_host_rsa_key /etc/ssh/ssh_host_rsa_key
+            cp /home/data/config/ssh/ssh_host_rsa_key /etc/ssh/ssh_host_rsa_key
             chmod 600 /etc/ssh/ssh_host_rsa_key || true
-            log "ssh rsa keys from config directory restored"
+            log "INFO: Ssh rsa keys from config directory restored"
         fi
 
-        if [ ! -f /home/config/users/userlist ]; then
-            echo -e "# In this file add the username and action in username:uid:action format.\n# UID needs to be 1000 and above and unique. Action filed to be + for active user " >> /home/config/users/userlist
-            log "initial userlist file created"
+        if [ ! -f /home/data/config/users/userlist ]; then
+            echo -e "# In this file add the username and action in username:uid:action format.\n# UID needs to be 1000 or above and unique. Action filed to be + for active user " >> /home/data/config/users/userlist
+            log "INFO: initial userlist file created"
         else
             while read line
             do
@@ -63,40 +67,45 @@ if  mountpoint -q /home; then
                 IFS=":" read -ra args <<< $line
 
                 user="${args[0]}"; validateArg "username" "$user" "$reUser"
-		uid="${args[1]}"; validateArg "UID" "$uid" "$reUid" 
+		        uid="${args[1]}"; validateArg "UID" "$uid" "$reUid" 
                 action="${args[2]}"; validateArg "action" "$action" "$reAction"
-                log "checking for user $user"
+                log "INFO: Checking for user $user"
                 if [ "$action" = "+" ]; then
-                    log "action defined to add user $user"
+                    log "INFO: Action defined to add user $user"
                     if [ "$uid" -ge "1000" ]; then
-			adduser -DH "$user"
-			usermod -p "*" "$user"
-			userhomedir="/home/$user"
-			usersshauthkeys="/home/$user/.ssh/authorized_keys"
-			if [ ! -d "$userhomedir" ] ; then
-				mkdir -p "$userhomedir"
-				chown root:root "$userhomedir"
-				chmod 755 "$userhomedir"
-				mkdir "$userhomedir/sftp"
-				chown $user:$user "$userhomedir/sftp"
-				log "Home and sftp directory created for $user"
-			fi
-			if [ ! -f "$usersshauthkeys" ]; then
-				ssh-keygen -t rsa -b 4096 -C "$user" -f "/home/config/usersshkeys/$user" -N "" 
-				mkdir "/home/$user/.ssh" 
-				mv "/home/config/usersshkeys/$user.pub" "/home/$user/.ssh/authorized_keys" 
-				chown "$user" "/home/$user/.ssh/authorized_keys" 
-				chmod 600 "/home/$user/.ssh/authorized_keys" 
-				log " SSH keys created for $user and the private key to share with user kept at /home/config/usersshkeys/$user"
-		         fi
+                        if getent passwd "$uid" > /dev/null; then
+                        log "ERROR: Given UID $uid already exists. Skipping."
+                        else 
+                            adduser -DH "$user" --uid "$uid"
+                            usermod -p "*" "$user"
+                            userhomedir="/home/$user"
+                            userdatadir="/home/data/home/$user"
+                            usersshauthkeys="/home/$user/.ssh/authorized_keys"
+                            if [ ! -d "$userhomedir" ] ; then
+                                mkdir -p "$userhomedir"
+                                chown root:root "$userhomedir"
+                                chmod 755 "$userhomedir"
+                                mkdir -p "$userdatadir"
+                                log "INFO: Home and sftp directory created for $user"
+                            fi
+                            if [ ! -f "$usersshauthkeys" ]; then
+                                ssh-keygen -t rsa -b 4096 -C "$user" -f "/home/data/config/usersshkeys/$user" -N "" 
+                                mkdir "/home/$user/.ssh" 
+                                mv "/home/data/config/usersshkeys/$user.pub" "/home/$user/.ssh/authorized_keys" 
+                                chown "$user" "/home/$user/.ssh/authorized_keys" 
+                                chmod 600 "/home/$user/.ssh/authorized_keys" 
+                                log " INFO: SSH keys created for $user and the private key to share with user kept at /home/data/config/usersshkeys/$user"
+                            fi
+                        fi
                     else
-                        log "Give UID for user $user is not in correct"
+                        log "ERROR: Given UID for user $user is not valid"
                     fi
                 fi
             
-            done <  /home/config/users/userlist
+            done <  /home/data/config/users/userlist
         fi
         
-	log "Executing sshd"
+	log "INFO: Executing sshd to start the service"
 	exec /usr/sbin/sshd -D -e
 fi
+
